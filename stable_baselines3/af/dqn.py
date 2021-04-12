@@ -103,12 +103,12 @@ class AF_DQN(DQN):
 
             losses.append(loss.cpu().detach().numpy())
 
-        with open('dyna_loss.csv', 'a') as f:
+        with open('logs/cp_loss.csv', 'a') as f:
             f.write(f'{self.num_timesteps}, {self._episode_num}, {np.mean(losses)}\n')
 
-    def _q_val(self, state: np.ndarray, action: int):
+    def _q_val(self, state: np.ndarray, action: int):   
         with th.no_grad():
-            return self.critic(ft(state.reshape(1, -1)).cuda()).cpu().numpy()[0][action]
+            return self.q_net(ft([state]).cuda()).cpu().numpy()[0][action]
 
     def _replan(self, state, plan, forecast):
         new_plan = np.empty(self.forecast_horizon, dtype=np.int8)
@@ -154,7 +154,8 @@ class AF_DQN(DQN):
             if len(self.episode_forecast) > self.forecast_horizon
             else np.mean(self.episode_forecast))
         self.episode_forecast = []
-        with open('forecast.csv', 'a') as f:
+
+        with open('logs/cp_forecast.csv', 'a') as f:
             f.write(f'{self.num_timesteps}, {self._episode_num}, {self.episode_forecasts[-1]}\n')
 
     """
