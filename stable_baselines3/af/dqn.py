@@ -249,11 +249,11 @@ class AF_DQN(DQN):
                 # see https://github.com/hill-a/stable-baselines/issues/900
                 self._on_step()
 
-                if not should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
-                    break
-
                 # AF
                 self.plan, self.forecasts = self._replan(self._last_obs[0], self.plan, self.forecasts) # self._last_obs was updated in _store_transition
+
+                if not should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
+                    break
 
             if done:
                 num_collected_episodes += 1

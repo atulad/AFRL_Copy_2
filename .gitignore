@@ -49,3 +49,5 @@ src
 MUJOCO_LOG.TXT
 
 stable_baselines3/runs
+stable_baselines3/logs
+frames

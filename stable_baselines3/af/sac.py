@@ -27,6 +27,7 @@ class AF_SAC(SAC):
         forecast_horizon: int,
         dynamics_layers: List[int],
         dynamics_lr: float = 1e-4,
+        logger_prefix: str = None,
         ### AF PARAMS END
         learning_rate: Union[float, Schedule] = 3e-4,
         buffer_size: int = 1000000,
@@ -89,11 +90,7 @@ class AF_SAC(SAC):
 
         self.zero_forecasts = np.zeros(self.forecast_horizon, np.int8)
         self.empty_plan = list
-
-        # self.loss_f = open('sac_dyna_loss.csv', 'a')
-        # self.loss_f.write('step,episode,loss\n')
-        # self.forecast_f = open('sac_forecast.csv', 'a')
-        # self.forecast_f.write('step,episode,forecast\n')
+        self.logger_prefix = logger_prefix
 
     def train_dynamics_model(self, gradient_steps: int, s: th.Tensor, a: th.Tensor, s2: th.Tensor):
         losses = []
@@ -108,12 +105,16 @@ class AF_SAC(SAC):
 
             losses.append(loss.cpu().detach().numpy())
 
-        # with open('sac_dyna_loss.csv', 'a') as loss_f:
-        #     loss_f.write(f'{self.num_timesteps}, {self._episode_num}, {np.mean(losses)}\n')
+        with open(f'logs/{self.logger_prefix}_loss.csv', 'a') as loss_f:
+            loss_f.write(f'{self.num_timesteps}, {self._episode_num}, {np.mean(losses)}\n')
 
-    def _q_val(self, state: np.ndarray, action: int):
+    def _q_val(self, state: np.ndarray, action: np.ndarray):
+        state = ft([state]).to(self.device)
+        action = ft([action]).to(self.device)
         with th.no_grad():
-            return self.q_net(ft(state.reshape(1, -1)).cuda()).cpu().numpy()[0][action]
+            q = th.cat(self.critic_target(state, action), dim=1)
+        q, _ = th.min(q, dim=1, keepdim=True)
+        return q.item()
 
     def _get_action(self):
         return self._sample_action(self.learning_starts, self.action_noise)[0][0]
@@ -162,8 +163,8 @@ class AF_SAC(SAC):
             else np.mean(self.episode_forecast))
         self.episode_forecast = []
 
-        # with open('sac_forecast.csv', 'a') as forecast_f:
-        #     forecast_f.write(f'{self.num_timesteps}, {self._episode_num}, {self.episode_forecasts[-1]}\n')
+        with open(f'logs/{self.logger_prefix}_forecast.csv', 'a') as forecast_f:
+            forecast_f.write(f'{self.num_timesteps}, {self._episode_num}, {self.episode_forecasts[-1]}\n')
 
     """
     __MODIFICATIONS__
@@ -257,11 +258,11 @@ class AF_SAC(SAC):
                 # see https://github.com/hill-a/stable-baselines/issues/900
                 self._on_step()
 
-                if not should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
-                    break
-
                 # AF
                 self.plan, self.forecasts = self._replan(self._last_obs[0], self.plan, self.forecasts) # self._last_obs was updated in _store_transition
+
+                if not should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
+                    break
 
             if done:
                 num_collected_episodes += 1

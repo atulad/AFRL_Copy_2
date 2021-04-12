@@ -1,23 +1,27 @@
 import time
 import gym
 from af.sac import AF_SAC
+from sac.sac import SAC
+from stable_baselines3.common.noise import OrnsteinUhlenbeckActionNoise
+import numpy as np
 
-env = gym.make('LunarLanderContinuous-v2')
+env = gym.make('Pendulum-v0')
 
 model = AF_SAC(
     'MlpPolicy',
-    env,
-    delta=100,
-    forecast_horizon=11,
+    env=gym.make('Pendulum-v0'),
+    delta=3,
+    forecast_horizon=8,
     dynamics_layers=[32, 32],
     dynamics_lr=1e-4,
     verbose=2,
-    batch_size=256,
     learning_starts=1000,
-    tensorboard_log='runs'
+    tensorboard_log='runs',
+    logger_prefix='p'
 )
 
 model.learn(
-    total_timesteps=int(5e5),
-    tb_log_name='AF_SAC'
+    total_timesteps=60000,
+    tb_log_name='P_AF_SAC'
 )
+
