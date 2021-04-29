@@ -1,3 +1,4 @@
 results
 aws_scripts
 **/__pycache__
+.vscode
