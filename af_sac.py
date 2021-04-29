@@ -1,26 +1,32 @@
-import time
+"""
+Using CPU (8 cores),
+- achieved >200 score in 268 episodes / 98175 steps (~32 min)
+"""
 import gym
 from afrl.sac import AF_SAC
+
+import string
+import random
+rand_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=3))
 
 env = gym.make('Pendulum-v0')
 
 model = AF_SAC(
     'MlpPolicy',
-    env=gym.make('Pendulum-v0'),
-    delta=3,
+    env=gym.make('LunarLanderContinuous-v2'),
+    delta=2,
     forecast_horizon=8,
     dynamics_layers=[32, 32],
     dynamics_lr=1e-4,
-    verbose=2,
+    verbose=0,
     learning_starts=1000,
-    tensorboard_log='runs',
-    q_loss_csv_filepath='results/csv/loss_p_sac.csv',
-    forecast_csv_filepath='results/csv/forecast_p_sac.csv',
-    device='cpu'
+    tensorboard_log='results/tboard',
+    device='cpu',
+    batch_size=256,
 )
 
 model.learn(
-    total_timesteps=60000,
-    tb_log_name='P_AF_SAC'
+    total_timesteps=200_000,
+    tb_log_name=f'P_AF_SAC_{rand_id}'
 )
 
