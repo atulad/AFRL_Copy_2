@@ -14,7 +14,7 @@ from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 from stable_baselines3.sac.policies import SACPolicy
 from stable_baselines3.common.utils import should_collect_more_steps
-
+from stable_baselines3.common import logger
 from .af import DynamicsModel
 
 class AF_SAC(SAC):
@@ -27,8 +27,6 @@ class AF_SAC(SAC):
         forecast_horizon: int,
         dynamics_layers: List[int],
         dynamics_lr: float = 1e-4,
-        q_loss_csv_filepath: str = None,
-        forecast_csv_filepath: str = None,
         ### AF PARAMS END
         learning_rate: Union[float, Schedule] = 3e-4,
         buffer_size: int = 1000000,
@@ -91,8 +89,6 @@ class AF_SAC(SAC):
 
         self.zero_forecasts = np.zeros(self.forecast_horizon, np.int8)
         self.empty_plan = list
-        self.q_loss_csv_filepath = q_loss_csv_filepath
-        self.forecast_csv_filepath = forecast_csv_filepath
 
     def train_dynamics_model(self, gradient_steps: int, s: th.Tensor, a: th.Tensor, s2: th.Tensor):
         losses = []
@@ -107,9 +103,8 @@ class AF_SAC(SAC):
 
             losses.append(loss.cpu().detach().numpy())
 
-        with open(self.q_loss_csv_filepath, 'a') as loss_f:
-            loss_f.write(f'{self.num_timesteps}, {self._episode_num}, {np.mean(losses)}\n')
-
+        logger.record("afrl/model_loss", np.mean(losses))
+        
     def _q_val(self, state: np.ndarray, action: np.ndarray):
         state = ft([state]).to(self.device)
         action = ft([action]).to(self.device)
@@ -165,8 +160,7 @@ class AF_SAC(SAC):
             else np.mean(self.episode_forecast))
         self.episode_forecast = []
 
-        with open(self.forecast_csv_filepath, 'a') as forecast_f:
-            forecast_f.write(f'{self.num_timesteps}, {self._episode_num}, {self.episode_forecasts[-1]}\n')
+        logger.record("afrl/forecast", np.mean(self.episode_forecasts[-1]))
 
     """
     __MODIFICATIONS__
