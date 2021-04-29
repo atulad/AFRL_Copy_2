@@ -2,3 +2,6 @@ numpy==1.20.2
 torch==1.8.1
 gym==0.18.0
 stable-baselines3==1.0
+# but first you must do conda install swig 
+box2d-py==2.3.8
+tensorboard==2.5.0
