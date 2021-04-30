@@ -120,7 +120,7 @@ class AF_DQN(DQN):
                 best_action = int(self.predict(state, deterministic=False)[0])
                 replan_q = self._q_val(state, best_action)
                 plan_q = self._q_val(state, action)
-                if replan_q > self.delta + plan_q:
+                if plan_q < self.delta * replan_q:
                     break
                 new_plan[k] = action
                 state = self.dynamics(state, action)
