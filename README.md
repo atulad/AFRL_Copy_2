@@ -12,5 +12,5 @@ python sac.py
 python af_sac.py
 
 ## run on aws cluster
-chmod +x ec2_cluster.sh
-./ec2_cluster.sh
+source ./ec2_cluster.sh
+tensorboard --logdir results/tboard/aws --load_fast=false 

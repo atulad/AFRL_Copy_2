@@ -19,22 +19,26 @@ KEY_NAME=my_kp
 KEY_PRIVATE=~/.ssh/aws/my_kp.pem
 N_INSTANCES=10
 INSTANCE_TYPE="c4.2xlarge"
-CMD='chmod +x ~/afrl/startup.sh && ~/afrl/startup.sh'
+SETUP_CMD="cd ~/afrl && source setup.sh"
+CODE_CMD="cd ~/afrl && python3 af_sac.py"
+CREATE_NEW=false # either create new instances or use stopped ones
+KILL=false # either terminate the instances at the end or just stop them
 
 # ------------------------------
 # --    Install packages      --
 # ------------------------------
-setup_instance() {
-    INSTANCE_ID=$1
-    idx=$2
-    # wait till instance is running
-    echo waiting till instance $idx is running...
-    aws ec2 wait instance-running --instance-ids $INSTANCE_ID && echo $idx running
 
+get_dns() {
+    INSTANCE_ID=$1
     # get instance public DNS
     PUBLIC_DNS=$(aws ec2 describe-instances \
         --instance-ids $INSTANCE_ID \
         | jq -r '.Reservations[].Instances[0].PublicDnsName')
+}
+
+test_ssh() {
+    INSTANCE_ID=$1
+    idx=$2
 
     # wait just a bit before attempting ssh
     while ! nc -z $PUBLIC_DNS 22 ; do sleep 1 ; done
@@ -42,7 +46,9 @@ setup_instance() {
     # test ssh into machine
     ssh -o StrictHostKeyChecking=no -i $KEY_PRIVATE ec2-user@$PUBLIC_DNS -o LogLevel=ERROR exit \
         && echo ssh works on $idx  || echo FAILED TO SSH on $idx
+}
 
+copy_cwd() {
     # copy code to machine
     rsync --exclude results -q -Pa -e "ssh -i $KEY_PRIVATE" -a $(pwd)/ ec2-user@$PUBLIC_DNS:~/afrl
 }
@@ -54,7 +60,7 @@ run_instance() {
     INSTANCE_ID=$1
     idx=$2
     # run command/file
-    ssh -i $KEY_PRIVATE ec2-user@$PUBLIC_DNS $CMD &
+    ssh -i $KEY_PRIVATE ec2-user@$PUBLIC_DNS $CODE_CMD &
     # get the PID of the process
     PID=$!
 
@@ -70,53 +76,104 @@ run_instance() {
 }
 
 # ------------------------------------------
-# -- Cleanup and Terminate Instance       --
+# --    Stop and Terminate Instance       --
 # ------------------------------------------
-kill_instance() {
+stop_instance() {
     INSTANCE_ID=$1
     idx=$2
     # shut down instance
-    aws ec2 stop-instances --instance-ids $INSTANCE_ID > /tmp/tmp
+    aws ec2 stop-instances --instance-ids $INSTANCE_ID >  /dev/null
+    aws ec2 wait instance-stopped --instance-ids $INSTANCE_ID && echo $idx is stopped
+}
 
+kill_instance() {
+    INSTANCE_ID=$1
+    idx=$2
     # terminate ec2 instance
-    aws ec2 terminate-instances --instance-ids $INSTANCE_ID > /tmp/tmp
+    aws ec2 terminate-instances --instance-ids $INSTANCE_ID >  /dev/null
     aws ec2 wait instance-terminated --instance-ids $INSTANCE_ID && echo $idx is terminated
 }
 
-# ------------------------------
-# -- Create Security group    --
-# ------------------------------
-# create an ec2 security group that would allow SSH access
-# aws ec2 create-security-group --description "basic SSH access on port 22" --group-name ssh_only
-
-# allow inbound port 22 traffic
-# aws ec2 authorize-security-group-ingress --group-name ssh_only --protocol tcp --port 22 --cidr "0.0.0.0/0"
-
-# remove security group
-# aws ec2 delete-security-group --group-name ssh_only
+finish_instance() {
+    INSTANCE_ID=$1
+    idx=$2
+    if [ "$KILL" = true ]; then
+        stop_instance $INSTANCE_ID $idx && \
+            kill_instance $INSTANCE_ID $idx
+    else
+        stop_instance $INSTANCE_ID $idx
+    fi
+}
 
 # ------------------------------
 # -- Create EC2 Instance(s)   --
 # ------------------------------
 # start new instances w AMI Linux
-INSTANCE_IDS=\
-$(aws ec2 run-instances \
-    --image-id ami-00f9f4069d04c0c6e \
-    --count $N_INSTANCES \
-    --instance-type $INSTANCE_TYPE \
-    --key-name $KEY_NAME \
-    --security-groups ssh_only \
-    | jq -r '.Instances[].InstanceId')
+create_instances() {
+    INSTANCE_IDS=$(aws ec2 run-instances \
+        --image-id ami-00f9f4069d04c0c6e \
+        --count $N_INSTANCES \
+        --instance-type $INSTANCE_TYPE \
+        --key-name $KEY_NAME \
+        --security-groups ssh_only \
+        | jq -r '.Instances[].InstanceId')
+}
 
-echo INSTANCE_IDS: $INSTANCE_IDS
+get_stopped_instances() {
+    INSTANCE_IDS=( $( aws ec2 describe-instances \
+    --filter Name=instance-state-name,Values=stopped \
+    | jq -r '.Reservations[].Instances[].InstanceId' ) )
+    echo found ${#INSTANCE_IDS[@]} stopped instances
+}
+
+start_instances() {
+    aws ec2 start-instances --instance-ids $INSTANCE_IDS > /dev/null
+    # wait till instance is running
+    aws ec2 wait instance-running --instance-ids $INSTANCE_IDS && echo instances running
+}
+
 
 # ------------------------------
 # --     Run main loop        --
 # ------------------------------
-idx=1
-for INSTANCE_ID in ${INSTANCE_IDS[@]}; do
-  setup_instance $INSTANCE_ID $idx && \
-    run_instance $INSTANCE_ID $idx && \
-    kill_instance $INSTANCE_ID $idx &
-  idx=$((idx + 1))
-done
+create_main() {
+    create_instances && start_instances
+    idx=1
+    for INSTANCE_ID in ${INSTANCE_IDS[@]}; do
+        get_dns $INSTANCE_ID && \
+        test_ssh $INSTANCE_ID $idx && \
+        copy_cwd && \
+        $SETUP_CMD $INSTANCE_ID $idx && \
+        run_instance $INSTANCE_ID $idx && \
+        finish_instance $INSTANCE_ID $idx
+        idx=$((idx + 1))
+    done
+}
+
+min() {
+    dc -e "[$1]sM $2d $1<Mp"
+}
+
+start_main() {
+    get_stopped_instances
+    # INSTANCE_IDS=(${INSTANCE_IDS[@]:0:$N_INSTANCES})
+    echo using $(min ${#INSTANCE_IDS[@]} $N_INSTANCES) instances
+    start_instances
+    idx=1
+    for INSTANCE_ID in ${INSTANCE_IDS[@]:0:$N_INSTANCES}; do
+        echo $INSTANCE_ID &&
+        get_dns $INSTANCE_ID && \
+        test_ssh $INSTANCE_ID $idx && \
+        copy_cwd && \
+        run_instance $INSTANCE_ID $idx && \
+        echo $PUBLIC_DNS && \
+        finish_instance $INSTANCE_ID $idx &
+        idx=$((idx + 1))
+    done
+}
+
+if [ "$CREATE_NEW" = true ] ; then
+    create_main
+else
+    start_main
+fi
