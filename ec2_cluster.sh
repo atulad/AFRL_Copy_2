@@ -17,10 +17,10 @@
 
 KEY_NAME=my_kp
 KEY_PRIVATE=~/.ssh/aws/my_kp.pem
-N_INSTANCES=10
+N_INSTANCES=2
 INSTANCE_TYPE="c4.2xlarge"
 SETUP_CMD="cd ~/afrl && source setup.sh"
-CODE_CMD="cd ~/afrl && python3 af_sac.py"
+CODE_CMD="cd ~/afrl && mkdir -p results/tboard && rm -r results/tboard && mkdir -p results/tboard && python3 af_sac.py"
 CREATE_NEW=false # either create new instances or use stopped ones
 KILL=false # either terminate the instances at the end or just stop them
 
@@ -53,12 +53,19 @@ copy_cwd() {
     rsync --exclude results -q -Pa -e "ssh -i $KEY_PRIVATE" -a $(pwd)/ ec2-user@$PUBLIC_DNS:~/afrl
 }
 
+setup_instance() {
+    idx=$2
+    ssh -i $KEY_PRIVATE ec2-user@$PUBLIC_DNS $SETUP_CMD
+    echo setup completed on $idx
+}
+
 # ------------------------------------------
 # --        Run code on instance          --
 # ------------------------------------------
 run_instance() {
     INSTANCE_ID=$1
     idx=$2
+    echo running code on $idx
     # run command/file
     ssh -i $KEY_PRIVATE ec2-user@$PUBLIC_DNS $CODE_CMD &
     # get the PID of the process
@@ -72,7 +79,7 @@ run_instance() {
 
     # one more sync at the end
     rsync -q -Pa -e "ssh -i $KEY_PRIVATE" ec2-user@${PUBLIC_DNS}:~/afrl/results/tboard/ results/tboard/aws
-    echo $idx is finished
+    echo code is completed on $idx
 }
 
 # ------------------------------------------
@@ -94,7 +101,7 @@ kill_instance() {
     aws ec2 wait instance-terminated --instance-ids $INSTANCE_ID && echo $idx is terminated
 }
 
-finish_instance() {
+close_instance() {
     INSTANCE_ID=$1
     idx=$2
     if [ "$KILL" = true ]; then
@@ -110,13 +117,13 @@ finish_instance() {
 # ------------------------------
 # start new instances w AMI Linux
 create_instances() {
-    INSTANCE_IDS=$(aws ec2 run-instances \
+    INSTANCE_IDS=( $(aws ec2 run-instances \
         --image-id ami-00f9f4069d04c0c6e \
         --count $N_INSTANCES \
         --instance-type $INSTANCE_TYPE \
         --key-name $KEY_NAME \
         --security-groups ssh_only \
-        | jq -r '.Instances[].InstanceId')
+        | jq -r '.Instances[].InstanceId') )
 }
 
 get_stopped_instances() {
@@ -140,34 +147,29 @@ create_main() {
     create_instances && start_instances
     idx=1
     for INSTANCE_ID in ${INSTANCE_IDS[@]}; do
-        get_dns $INSTANCE_ID && \
+        ( (get_dns $INSTANCE_ID && \
         test_ssh $INSTANCE_ID $idx && \
         copy_cwd && \
-        $SETUP_CMD $INSTANCE_ID $idx && \
+        setup_instance $INSTANCE_ID $idx && \
         run_instance $INSTANCE_ID $idx && \
-        finish_instance $INSTANCE_ID $idx
+        close_instance $INSTANCE_ID $idx) & )
         idx=$((idx + 1))
     done
 }
 
-min() {
-    dc -e "[$1]sM $2d $1<Mp"
-}
-
 start_main() {
     get_stopped_instances
-    # INSTANCE_IDS=(${INSTANCE_IDS[@]:0:$N_INSTANCES})
-    echo using $(min ${#INSTANCE_IDS[@]} $N_INSTANCES) instances
+    INSTANCE_IDS=(${INSTANCE_IDS[@]:0:$N_INSTANCES})
+    echo using ${#INSTANCE_IDS[@]} instances
+    echo $INSTANCE_IDS
     start_instances
     idx=1
-    for INSTANCE_ID in ${INSTANCE_IDS[@]:0:$N_INSTANCES}; do
-        echo $INSTANCE_ID &&
-        get_dns $INSTANCE_ID && \
+    for INSTANCE_ID in ${INSTANCE_IDS[@]}; do
+        ( (get_dns $INSTANCE_ID && \
         test_ssh $INSTANCE_ID $idx && \
         copy_cwd && \
         run_instance $INSTANCE_ID $idx && \
-        echo $PUBLIC_DNS && \
-        finish_instance $INSTANCE_ID $idx &
+        close_instance $INSTANCE_ID $idx) & )
         idx=$((idx + 1))
     done
 }
