@@ -9,13 +9,13 @@ import string
 import random
 rand_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=3))
 
-env = gym.make('Pendulum-v0')
+env = gym.make('CartPole-v1')
 
 delta = 0.95
 
 model = AF_SAC(
     'MlpPolicy',
-    env=gym.make('LunarLanderContinuous-v2'),
+    env=gym.make('CartPole-v1'),
     delta=delta,
     forecast_horizon=8,
     dynamics_layers=[32, 32],
